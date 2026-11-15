@@ -18,7 +18,8 @@ import {
   Check,
   X,
   RefreshCw,
-  Smartphone
+  Smartphone,
+  Users
 } from 'lucide-react';
 
 const AIRPORTS = [
@@ -175,12 +176,14 @@ export default function App() {
   const [destination, setDestination] = useState(AIRPORTS[7]);
   const [selectedMonths, setSelectedMonths] = useState(['Mar/27', 'Abr/27', 'Mai/27']);
   const [days, setDays] = useState(7);
+  const [passengers, setPassengers] = useState(1);
   const [program, setProgram] = useState(PROGRAMS[0].name);
   const [targetPoints, setTargetPoints] = useState(45000);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [results, setResults] = useState([]);
+  const [searchedPax, setSearchedPax] = useState(1);
   const [routeSummary, setRouteSummary] = useState('');
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
@@ -188,7 +191,7 @@ export default function App() {
 
   const [alerts, setAlerts] = useState(() => {
     try {
-      const saved = localStorage.getItem('milharadar_alerts_v1');
+      const saved = localStorage.getItem('milharadar_alerts_v2');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -198,7 +201,7 @@ export default function App() {
   const [scanningAlerts, setScanningAlerts] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('milharadar_alerts_v1', JSON.stringify(alerts));
+    localStorage.setItem('milharadar_alerts_v2', JSON.stringify(alerts));
   }, [alerts]);
 
   const toggleMonth = (m) => {
@@ -223,6 +226,7 @@ export default function App() {
     }
     setLoading(true);
     setError('');
+    const currentPax = Math.max(1, Number(passengers) || 1);
 
     try {
       const res = await fetch('/api/search', {
@@ -233,6 +237,7 @@ export default function App() {
           destination,
           months: selectedMonths,
           days,
+          passengers: currentPax,
           program,
           targetPoints: Number(targetPoints)
         })
@@ -243,6 +248,7 @@ export default function App() {
 
       const sorted = (data.options || []).sort((a, b) => a.totalPoints - b.totalPoints);
       setResults(sorted);
+      setSearchedPax(currentPax);
       setRouteSummary(data.routeSummary || '');
     } catch (err) {
       setError(err.message);
@@ -252,18 +258,23 @@ export default function App() {
   };
 
   const handleCreateAlert = () => {
+    const currentPax = Math.max(1, Number(passengers) || 1);
+    const totalTarget = Number(targetPoints) * currentPax;
+
     const newAlert = {
       id: Date.now().toString(),
       origin,
       destination,
       months: selectedMonths,
       days,
+      passengers: currentPax,
       program,
-      targetPoints: Number(targetPoints),
+      targetPointsPerPax: Number(targetPoints),
+      totalTargetPoints: totalTarget,
       bestFound: results.length > 0 ? results[0].totalPoints : null,
       bestDate: results.length > 0 ? `${results[0].departureDate} - ${results[0].returnDate}` : null,
       lastChecked: 'Agora mesmo',
-      status: results.length > 0 && results[0].totalPoints <= Number(targetPoints) ? 'hit' : 'monitoring'
+      status: results.length > 0 && results[0].totalPoints <= totalTarget ? 'hit' : 'monitoring'
     };
 
     setAlerts(prev => [newAlert, ...prev]);
@@ -278,6 +289,10 @@ export default function App() {
     const updated = [...alerts];
     for (let i = 0; i < updated.length; i++) {
       const item = updated[i];
+      const pax = item.passengers || 1;
+      const targetPerPax = item.targetPointsPerPax || item.targetPoints || 45000;
+      const totalTarget = targetPerPax * pax;
+
       try {
         const res = await fetch('/api/search', {
           method: 'POST',
@@ -287,8 +302,9 @@ export default function App() {
             destination: item.destination,
             months: item.months,
             days: item.days,
+            passengers: pax,
             program: item.program,
-            targetPoints: item.targetPoints
+            targetPoints: targetPerPax
           })
         });
         const data = await res.json();
@@ -300,7 +316,7 @@ export default function App() {
             bestFound: best.totalPoints,
             bestDate: `${best.departureDate} - ${best.returnDate}`,
             lastChecked: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            status: best.totalPoints <= item.targetPoints ? 'hit' : 'monitoring'
+            status: best.totalPoints <= totalTarget ? 'hit' : 'monitoring'
           };
         }
       } catch {
@@ -313,10 +329,12 @@ export default function App() {
   };
 
   const copySummary = (ticket) => {
+    const perPax = Math.round(ticket.totalPoints / searchedPax);
     const text = `✈️ MilhaRadar | ${origin.code} -> ${destination.code}
 📅 ${ticket.departureDate} até ${ticket.returnDate} (${days} dias)
+👥 Passageiros: ${searchedPax} pessoa(s)
 🏆 Programa: ${program}
-💎 Total: ${ticket.totalPoints.toLocaleString('pt-BR')} pts (Ida: ${ticket.outboundPoints.toLocaleString('pt-BR')} | Volta: ${ticket.returnPoints.toLocaleString('pt-BR')})
+💎 Total (${searchedPax} pax): ${ticket.totalPoints.toLocaleString('pt-BR')} pts (~${perPax.toLocaleString('pt-BR')} pts/pessoa)
 🛫 ${ticket.airline} • ${ticket.stops}`;
     navigator.clipboard.writeText(text);
     setCopiedId(ticket.id);
@@ -324,6 +342,7 @@ export default function App() {
   };
 
   const hitCount = alerts.filter(a => a.status === 'hit').length;
+  const totalGoalPreview = Number(targetPoints || 0) * Math.max(1, Number(passengers) || 1);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-24">
@@ -341,7 +360,7 @@ export default function App() {
                   IA LIVE
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Monitoramento 3x/dia • 08h • 14h • 20h</p>
+              <p className="text-[11px] text-slate-400">Radar Diário Automático • 08h00</p>
             </div>
           </div>
 
@@ -449,8 +468,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Days, Program & Target Points */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Days, Passengers, Program & Target Points */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
                     Duração (Dias)
@@ -467,8 +486,23 @@ export default function App() {
 
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-sky-400" />
+                    Passageiros
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={9}
+                    value={passengers}
+                    onChange={e => setPassengers(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2.5 text-sm font-mono text-sky-400 font-bold focus:outline-none focus:border-sky-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
                     <Award className="w-3.5 h-3.5 text-sky-400" />
-                    Programa de Pontos
+                    Programa
                   </label>
                   <select
                     value={program}
@@ -486,7 +520,7 @@ export default function App() {
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
                     <Target className="w-3.5 h-3.5 text-emerald-400" />
-                    Pontuação Target (Total)
+                    Meta / Pessoa
                   </label>
                   <input
                     type="number"
@@ -498,6 +532,13 @@ export default function App() {
                   />
                 </div>
               </div>
+
+              {Number(passengers) > 1 && (
+                <div className="px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Meta total consolidada para <strong>{passengers} passageiros</strong>:</span>
+                  <span className="font-mono font-bold text-emerald-400">{totalGoalPreview.toLocaleString('pt-BR')} pts</span>
+                </div>
+              )}
 
               {error && (
                 <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
@@ -532,7 +573,7 @@ export default function App() {
                   className="py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition"
                 >
                   <BellRing className="w-4 h-4 text-amber-400" />
-                  Criar Alerta 3x/dia
+                  Criar Alerta Diário
                 </button>
               </div>
 
@@ -540,7 +581,7 @@ export default function App() {
                 <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs flex items-center justify-between">
                   <span className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4" />
-                    Alerta criado! Monitoramento ativado 3x por dia (08h, 14h e 20h).
+                    Alerta criado para {passengers} passageiro(s)! Monitoramento ativado.
                   </span>
                   <button
                     type="button"
@@ -559,7 +600,7 @@ export default function App() {
                 <Sparkles className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />
                 <div>
                   <div className="text-xs font-bold uppercase tracking-wider text-sky-400 mb-1">
-                    Diagnóstico da Rota ({origin.code} → {destination.code})
+                    Diagnóstico da Rota ({origin.code} → {destination.code} • {searchedPax} pax)
                   </div>
                   <p className="text-sm text-slate-300 leading-relaxed">{routeSummary}</p>
                 </div>
@@ -571,13 +612,18 @@ export default function App() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Melhores Oportunidades Encontradas ({results.length})
+                    Melhores Oportunidades ({searchedPax} {searchedPax === 1 ? 'Passageiro' : 'Passageiros'})
                   </h2>
-                  <span className="text-xs text-slate-500 font-mono">Meta: ≤ {Number(targetPoints).toLocaleString('pt-BR')} pts</span>
+                  <span className="text-xs text-slate-500 font-mono">
+                    Meta total: ≤ {(Number(targetPoints) * searchedPax).toLocaleString('pt-BR')} pts
+                  </span>
                 </div>
 
                 {results.map((ticket, index) => {
-                  const withinTarget = ticket.totalPoints <= Number(targetPoints);
+                  const totalMeta = Number(targetPoints) * searchedPax;
+                  const withinTarget = ticket.totalPoints <= totalMeta;
+                  const perPax = Math.round(ticket.totalPoints / searchedPax);
+
                   return (
                     <div
                       key={ticket.id || index}
@@ -627,12 +673,16 @@ export default function App() {
                         {/* Points & Action */}
                         <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-800">
                           <div className="text-left sm:text-right">
-                            <div className="text-[11px] uppercase tracking-wider text-slate-400">{program}</div>
+                            <div className="text-[11px] uppercase tracking-wider text-slate-400">
+                              {program} • {searchedPax} {searchedPax === 1 ? 'pessoa' : 'pessoas'}
+                            </div>
                             <div className={`text-2xl font-black font-mono ${withinTarget ? 'text-emerald-400' : 'text-white'}`}>
                               {ticket.totalPoints.toLocaleString('pt-BR')} <span className="text-xs font-normal">pts</span>
                             </div>
                             <div className="text-[11px] text-slate-500 font-mono">
-                              Ida {ticket.outboundPoints.toLocaleString('pt-BR')} + Volta {ticket.returnPoints.toLocaleString('pt-BR')}
+                              {searchedPax > 1
+                                ? `~${perPax.toLocaleString('pt-BR')} pts por pessoa`
+                                : `Ida ${ticket.outboundPoints.toLocaleString('pt-BR')} + Volta ${ticket.returnPoints.toLocaleString('pt-BR')}`}
                             </div>
                           </div>
 
@@ -674,10 +724,10 @@ export default function App() {
               <div>
                 <h2 className="text-sm font-bold text-white flex items-center gap-2">
                   <Clock className="w-4 h-4 text-sky-400" />
-                  Radar Automático (08:00 • 14:00 • 20:00)
+                  Radar Automático Diário (08:00)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  O agente verifica seus trechos salvos 3x ao dia e sinaliza quando atingir sua meta de pontos.
+                  O agente verifica seus trechos salvos diariamente e sinaliza quando atingir sua meta de pontos.
                 </p>
               </div>
               <button
@@ -695,7 +745,7 @@ export default function App() {
                 <Bell className="w-10 h-10 text-slate-600 mx-auto mb-3" />
                 <p className="text-sm font-semibold text-slate-300">Nenhum alerta monitorado ainda</p>
                 <p className="text-xs text-slate-500 mt-1 mb-4">
-                  Configure uma rota na aba de busca e clique em "Criar Alerta 3x/dia".
+                  Configure uma rota na aba de busca e clique em "Criar Alerta Diário".
                 </p>
                 <button
                   onClick={() => setActiveTab('search')}
@@ -706,58 +756,65 @@ export default function App() {
               </div>
             ) : (
               <div className="space-y-3">
-                {alerts.map(alert => (
-                  <div
-                    key={alert.id}
-                    className={`bg-slate-900 border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                      alert.status === 'hit' ? 'border-emerald-500/50' : 'border-slate-800'
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-black text-lg text-white">
-                          {alert.origin.code} → {alert.destination.code}
-                        </span>
-                        <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                          {alert.program}
-                        </span>
-                        {alert.status === 'hit' && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
-                            META ATINGIDA!
+                {alerts.map(alert => {
+                  const pax = alert.passengers || 1;
+                  const totalTarget = alert.totalTargetPoints || (alert.targetPointsPerPax || alert.targetPoints || 0) * pax;
+                  return (
+                    <div
+                      key={alert.id}
+                      className={`bg-slate-900 border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                        alert.status === 'hit' ? 'border-emerald-500/50' : 'border-slate-800'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-black text-lg text-white">
+                            {alert.origin.code} → {alert.destination.code}
                           </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        Meses: {alert.months.join(', ')} • {alert.days} dias
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Última checagem: {alert.lastChecked}
-                        {alert.bestDate && ` • Melhor janela: ${alert.bestDate}`}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-800">
-                      <div className="text-left sm:text-right">
-                        <div className="text-[11px] text-slate-400">
-                          Target: <strong className="font-mono text-slate-200">{alert.targetPoints.toLocaleString('pt-BR')}</strong>
+                          <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                            {alert.program}
+                          </span>
+                          <span className="text-xs px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 font-mono">
+                            {pax} pax
+                          </span>
+                          {alert.status === 'hit' && (
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
+                              META ATINGIDA!
+                            </span>
+                          )}
                         </div>
-                        {alert.bestFound && (
-                          <div className={`text-sm font-mono font-black ${alert.status === 'hit' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                            Menor: {alert.bestFound.toLocaleString('pt-BR')} pts
-                          </div>
-                        )}
+                        <div className="text-xs text-slate-400">
+                          Meses: {alert.months.join(', ')} • {alert.days} dias
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Última checagem: {alert.lastChecked}
+                          {alert.bestDate && ` • Melhor janela: ${alert.bestDate}`}
+                        </div>
                       </div>
 
-                      <button
-                        onClick={() => setAlerts(prev => prev.filter(a => a.id !== alert.id))}
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
-                        title="Excluir alerta"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-800">
+                        <div className="text-left sm:text-right">
+                          <div className="text-[11px] text-slate-400">
+                            Meta Total ({pax} pax): <strong className="font-mono text-slate-200">{totalTarget.toLocaleString('pt-BR')}</strong>
+                          </div>
+                          {alert.bestFound && (
+                            <div className={`text-sm font-mono font-black ${alert.status === 'hit' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                              Menor: {alert.bestFound.toLocaleString('pt-BR')} pts
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={() => setAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                          className="p-2 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                          title="Excluir alerta"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -788,11 +845,15 @@ export default function App() {
                 <span className="text-white">{selectedTicket.departureDate} - {selectedTicket.returnDate}</span>
               </div>
               <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Passageiros:</span>
+                <span className="text-white font-semibold">{searchedPax} pessoa(s)</span>
+              </div>
+              <div className="flex justify-between text-sm">
                 <span className="text-slate-400">Programa:</span>
                 <span className="text-sky-400 font-semibold">{program}</span>
               </div>
               <div className="flex justify-between text-sm pt-2 border-t border-slate-800">
-                <span className="text-slate-400">Total Estimado:</span>
+                <span className="text-slate-400">Total ({searchedPax} pax):</span>
                 <span className="font-mono font-black text-emerald-400 text-base">
                   {selectedTicket.totalPoints.toLocaleString('pt-BR')} pts
                 </span>
@@ -802,7 +863,7 @@ export default function App() {
             <div className="text-xs text-slate-300 space-y-2">
               <p className="font-semibold text-white">Passos recomendados para emitir:</p>
               <ol className="list-decimal list-inside space-y-1 text-slate-400">
-                <li>Acesse o portal oficial do <strong>{program}</strong> e marque "Usar pontos/milhas".</li>
+                <li>Acesse o portal oficial do <strong>{program}</strong>, selecione <strong>{searchedPax} passageiro(s)</strong> e marque "Usar pontos/milhas".</li>
                 <li>Pesquise exatamente as datas <strong>{selectedTicket.departureDate}</strong> e <strong>{selectedTicket.returnDate}</strong>.</li>
                 <li>Antes de transferir pontos do cartão, confirme se há promoção de transferência bonificada ativa.</li>
               </ol>
