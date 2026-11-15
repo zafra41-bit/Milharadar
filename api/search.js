@@ -24,7 +24,7 @@ Analise a seguinte solicitação de voo e retorne exatamente 5 opções estraté
 Considere sazonalidade real, janelas de baixa temporada dentro dos meses solicitados, voos diretos vs conexões, companhias parceiras e oportunidades de tabela fixa quando aplicável.`;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
