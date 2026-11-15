@@ -14,18 +14,17 @@ export default async function handler(req, res) {
     const targetPerPax = Number(targetPoints) || 45000;
     const totalTargetAllPax = targetPerPax * paxCount;
 
-    const prompt = `Você é um especialista sênior em emissão de passagens aéreas com milhas e programas de fidelidade.
-Analise a seguinte solicitação de voo e retorne exatamente 5 opções estratégicas de datas de viagem (ida e volta) com estimativas realistas de pontuação.
+    const prompt = `Você é um especialista em milhas aéreas. Analise a rota e retorne EXATAMENTE 3 opções estratégicas de datas (ida e volta) com estimativas realistas de pontuação.
 
 - Origem: ${origin.code} (${origin.city})
 - Destino: ${destination.code} (${destination.city})
-- Meses desejados: ${months.join(', ')}
-- Duração da viagem: ${days} dias
-- Quantidade exata de passageiros: ${paxCount} pessoa(s)
-- Programa de fidelidade: ${program}
+- Meses: ${months.join(', ')}
+- Duração: ${days} dias
+- Passageiros: ${paxCount} pessoa(s)
+- Programa: ${program}
 
 IMPORTANTE: 
-O valor de "totalPoints" DEVE ser obrigatoriamente a pontuação unitária multiplicada por ${paxCount} (ou seja, o total para todos os passageiros juntos).`;
+O valor de "totalPoints" DEVE ser obrigatoriamente a pontuação total somada para todos os ${paxCount} passageiros juntos.`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
@@ -41,7 +40,7 @@ O valor de "totalPoints" DEVE ser obrigatoriamente a pontuação unitária multi
               properties: {
                 routeSummary: {
                   type: 'STRING',
-                  description: 'Análise curta e estratégica sobre o comportamento de tarifas.'
+                  description: 'Análise curta e estratégica sobre a rota.'
                 },
                 options: {
                   type: 'ARRAY',
@@ -52,9 +51,9 @@ O valor de "totalPoints" DEVE ser obrigatoriamente a pontuação unitária multi
                       departureDate: { type: 'STRING' },
                       returnDate: { type: 'STRING' },
                       monthLabel: { type: 'STRING' },
-                      outboundPoints: { type: 'INTEGER', description: 'Total na ida para todos os passageiros juntos' },
-                      returnPoints: { type: 'INTEGER', description: 'Total na volta para todos os passageiros juntos' },
-                      totalPoints: { type: 'INTEGER', description: 'SOMA TOTAL (ida + volta) multiplicada por todos os passageiros' },
+                      outboundPoints: { type: 'INTEGER', description: 'Total na ida para todos os passageiros' },
+                      returnPoints: { type: 'INTEGER', description: 'Total na volta para todos os passageiros' },
+                      totalPoints: { type: 'INTEGER', description: 'SOMA TOTAL (ida + volta) para todos os passageiros' },
                       airline: { type: 'STRING' },
                       stops: { type: 'STRING' },
                       duration: { type: 'STRING' },
@@ -79,11 +78,10 @@ O valor de "totalPoints" DEVE ser obrigatoriamente a pontuação unitária multi
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     const parsed = JSON.parse(text);
 
-    // Garantia matemática no backend para evitar que a IA mande valor unitário por engano
+    // Garante no máximo 3 opções e que o cálculo de passageiros esteja correto
     if (parsed && parsed.options) {
-      parsed.options = parsed.options.map(opt => {
+      parsed.options = parsed.options.slice(0, 3).map(opt => {
         const expectedTotal = opt.outboundPoints + opt.returnPoints;
-        // Se a IA mandou um valor menor que o unitário, multiplicamos pelos passageiros
         const finalTotal = opt.totalPoints < expectedTotal * 1.5 ? expectedTotal : opt.totalPoints;
         return {
           ...opt,
