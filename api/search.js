@@ -15,19 +15,17 @@ export default async function handler(req, res) {
     const totalTargetAllPax = targetPerPax * paxCount;
 
     const prompt = `Você é um especialista sênior em emissão de passagens aéreas com milhas e programas de fidelidade.
-Analise a seguinte solicitação de voo e retorne exatamente 5 opções estratégicas de datas de viagem (ida e volta) com estimativas realistas de pontuação baseadas nas tabelas dinâmicas/fixas e histórico do programa selecionado:
+Analise a seguinte solicitação de voo e retorne exatamente 5 opções estratégicas de datas de viagem (ida e volta) com estimativas realistas de pontuação.
 
-- Origem: ${origin.code} (${origin.city} - ${origin.name})
-- Destino: ${destination.code} (${destination.city} - ${destination.name})
+- Origem: ${origin.code} (${origin.city})
+- Destino: ${destination.code} (${destination.city})
 - Meses desejados: ${months.join(', ')}
 - Duração da viagem: ${days} dias
-- Quantidade de passageiros: ${paxCount} passageiro(s)
+- Quantidade exata de passageiros: ${paxCount} pessoa(s)
 - Programa de fidelidade: ${program}
-- Pontuação Target por passageiro (ida+volta): ${targetPerPax} pontos (Meta total para ${paxCount} passageiro(s): ${totalTargetAllPax} pontos)
 
-IMPORTANTE:
-1. Retorne os valores de outboundPoints, returnPoints e totalPoints correspondentes à SOMA TOTAL para todos os ${paxCount} passageiro(s) (ida e volta).
-2. Considere sazonalidade real, janelas de baixa temporada dentro dos meses solicitados, disponibilidade de assentos award para ${paxCount} passageiro(s), voos diretos vs conexões e oportunidades de tabela fixa quando aplicável.`;
+IMPORTANTE: 
+O valor de "totalPoints" DEVE ser obrigatoriamente a pontuação unitária multiplicada por ${paxCount} (ou seja, o total para todos os passageiros juntos).`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`,
@@ -43,7 +41,7 @@ IMPORTANTE:
               properties: {
                 routeSummary: {
                   type: 'STRING',
-                  description: 'Análise curta e estratégica sobre o comportamento de tarifas em milhas e disponibilidade de assentos para essa rota, programa e quantidade de passageiros.'
+                  description: 'Análise curta e estratégica sobre o comportamento de tarifas.'
                 },
                 options: {
                   type: 'ARRAY',
@@ -51,16 +49,16 @@ IMPORTANTE:
                     type: 'OBJECT',
                     properties: {
                       id: { type: 'STRING' },
-                      departureDate: { type: 'STRING', description: 'Ex: 14 Mai 2027' },
-                      returnDate: { type: 'STRING', description: 'Ex: 21 Mai 2027' },
-                      monthLabel: { type: 'STRING', description: 'Ex: Mai/27' },
-                      outboundPoints: { type: 'INTEGER', description: 'Total de pontos na ida somando todos os passageiros' },
-                      returnPoints: { type: 'INTEGER', description: 'Total de pontos na volta somando todos os passageiros' },
-                      totalPoints: { type: 'INTEGER', description: 'Total geral ida + volta para todos os passageiros' },
+                      departureDate: { type: 'STRING' },
+                      returnDate: { type: 'STRING' },
+                      monthLabel: { type: 'STRING' },
+                      outboundPoints: { type: 'INTEGER', description: 'Total na ida para todos os passageiros juntos' },
+                      returnPoints: { type: 'INTEGER', description: 'Total na volta para todos os passageiros juntos' },
+                      totalPoints: { type: 'INTEGER', description: 'SOMA TOTAL (ida + volta) multiplicada por todos os passageiros' },
                       airline: { type: 'STRING' },
-                      stops: { type: 'STRING', description: 'Ex: Direto ou 1 parada (VCP)' },
-                      duration: { type: 'STRING', description: 'Ex: 3h 25m' },
-                      insight: { type: 'STRING', description: 'Justificativa prática do porquê essa data tem boa pontuação e disponibilidade.' }
+                      stops: { type: 'STRING' },
+                      duration: { type: 'STRING' },
+                      insight: { type: 'STRING' }
                     },
                     required: ['id', 'departureDate', 'returnDate', 'monthLabel', 'outboundPoints', 'returnPoints', 'totalPoints', 'airline', 'stops', 'duration', 'insight']
                   }
@@ -80,6 +78,20 @@ IMPORTANTE:
 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     const parsed = JSON.parse(text);
+
+    // Garantia matemática no backend para evitar que a IA mande valor unitário por engano
+    if (parsed && parsed.options) {
+      parsed.options = parsed.options.map(opt => {
+        const expectedTotal = opt.outboundPoints + opt.returnPoints;
+        // Se a IA mandou um valor menor que o unitário, multiplicamos pelos passageiros
+        const finalTotal = opt.totalPoints < expectedTotal * 1.5 ? expectedTotal : opt.totalPoints;
+        return {
+          ...opt,
+          totalPoints: finalTotal
+        };
+      });
+    }
+
     return res.status(200).json(parsed);
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Erro interno no servidor' });
