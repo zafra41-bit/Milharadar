@@ -60,28 +60,48 @@ function getAdultPointOption(journey) {
   return null;
 }
 function normalizeGecko(data, adults, minNights) {
-  const out=[];
-  for (const trip of (data.trips||[])) for (const j of (trip.journeys||[])) {
-    if (j.available===false) continue;
-    const opt=getAdultPointOption(j); if (!opt) continue;
-    const dep=(j.departure||trip.date||'').slice(0,10), ret=data.returnDate;
-    if (!dep||!ret) continue;
-    const nights=Math.round((new Date(ret+'T00:00:00Z')-new Date(dep+'T00:00:00Z'))/86400000);
-    if (nights<minNights) continue;
-    const points=Number(opt.points), discounted=Number(opt.discountedPoints)>0?Number(opt.discountedPoints):points;
-    const tax=Number(opt.taxesAndFees&&opt.taxesAndFees.amount||0), segments=j.segments||[];
-    out.push({id:'gecko-'+dep+'-'+ret+'-'+(j.id||j.journeyKey||out.length),
-      departureDate:brDate(dep),returnDate:brDate(ret),
-      monthLabel:new Date(dep+'T00:00:00Z').toLocaleDateString('pt-BR',{month:'short',year:'2-digit',timeZone:'UTC'}),
-      pointsPerPassenger:points,discountedPointsPerPassenger:discounted,totalPoints:points*adults,
-      discountedTotalPoints:discounted*adults,passengers:adults,taxesPerPassenger:tax,totalTaxes:tax*adults,
-      airline:'Azul',stops:segments.length>1?(segments.length-1)+' conexão(ões)':'Direto',
-      duration:j.duration||'Consulte os horários',nights,departureTime:j.departure||null,arrivalTime:j.arrival||null,
-      segments:segments.map(s=>({from:s.origin,to:s.destination,departure:s.departure,arrival:s.arrival,flightNumber:s.flight&&s.flight.flightNumber||null})),
-      priceBasis:'geckoapi-points-options',
-      insight:'GeckoAPI/Azul: '+points.toLocaleString('pt-BR')+' pontos por adulto (nível 1). Taxas: R$ '+tax.toFixed(2)+' por adulto. Tarifas infantis devem ser verificadas separadamente.'});
+  const outbound=[], inbound=[];
+  for (const trip of (data.trips||[])) {
+    for (const j of (trip.journeys||[])) {
+      if (j.available===false) continue;
+      const opt=getAdultPointOption(j);
+      if (!opt) continue;
+      const row={journey:j,option:opt,points:Number(opt.points),
+        discounted:Number(opt.discountedPoints)>0?Number(opt.discountedPoints):Number(opt.points),
+        tax:Number(opt.taxesAndFees&&opt.taxesAndFees.amount||0)};
+      if (trip.origin===data.from && trip.destination===data.to) outbound.push(row);
+      if (trip.origin===data.to && trip.destination===data.from) inbound.push(row);
+    }
   }
-  return out;
+  if (!outbound.length || !inbound.length || !data.departureDate || !data.returnDate) return [];
+  const dep=data.departureDate, ret=data.returnDate;
+  const nights=Math.round((new Date(ret+'T00:00:00Z')-new Date(dep+'T00:00:00Z'))/86400000);
+  if (nights<minNights) return [];
+  const sort=(a,b)=>a.points-b.points;
+  const out=outbound.sort(sort)[0], back=inbound.sort(sort)[0];
+  const outJ=out.journey, backJ=back.journey;
+  const totalPerAdult=out.points+back.points, discountedPerAdult=out.discounted+back.discounted;
+  const taxesPerAdult=out.tax+back.tax;
+  return [{
+    id:'gecko-'+dep+'-'+ret,
+    departureDate:brDate(dep),returnDate:brDate(ret),
+    monthLabel:new Date(dep+'T00:00:00Z').toLocaleDateString('pt-BR',{month:'short',year:'2-digit',timeZone:'UTC'}),
+    outboundPoints:out.points,returnPoints:back.points,
+    pointsPerPassenger:totalPerAdult,discountedPointsPerPassenger:discountedPerAdult,
+    totalPoints:totalPerAdult*adults,discountedTotalPoints:discountedPerAdult*adults,
+    passengers:adults,taxesPerPassenger:taxesPerAdult,totalTaxes:taxesPerAdult*adults,
+    airline:'Azul',
+    stops:'Ida: '+((outJ.segments||[]).length>1?((outJ.segments||[]).length-1)+' conexão(ões)':'Direto')+
+      ' • Volta: '+((backJ.segments||[]).length>1?((backJ.segments||[]).length-1)+' conexão(ões)':'Direto'),
+    duration:'Ida '+(outJ.duration||'')+' • volta '+(backJ.duration||''),
+    nights,departureTime:outJ.departure||null,arrivalTime:outJ.arrival||null,
+    returnDepartureTime:backJ.departure||null,returnArrivalTime:backJ.arrival||null,
+    outboundSegments:(outJ.segments||[]).map(s=>({from:s.origin,to:s.destination,departure:s.departure,arrival:s.arrival,flightNumber:s.flight&&s.flight.flightNumber||null})),
+    returnSegments:(backJ.segments||[]).map(s=>({from:s.origin,to:s.destination,departure:s.departure,arrival:s.arrival,flightNumber:s.flight&&s.flight.flightNumber||null})),
+    priceBasis:'geckoapi-points-options',
+    insight:'GeckoAPI/Azul: ida '+out.points.toLocaleString('pt-BR')+' + volta '+back.points.toLocaleString('pt-BR')+
+      ' pontos por adulto. Taxas somadas: R$ '+taxesPerAdult.toFixed(2)+' por adulto. Bebês/crianças são tratados separadamente.'
+  }];
 }
 async function fetchGecko(args) {
   const key=process.env.GECKO_API_KEY||process.env.GECKOAPI_API_KEY;
