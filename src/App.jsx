@@ -356,11 +356,11 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-black tracking-tight text-lg text-white">MilhaRadar</h1>
-                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                  IA LIVE
+                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                  FONTE AZUL
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Radar Diário Automático • 08h00</p>
+              <p className="text-[11px] text-slate-400">Ofertas publicadas pela Azul • consulta sob demanda</p>
             </div>
           </div>
 
@@ -472,7 +472,7 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                    Duração (Dias)
+                    Duração mínima (noites)
                   </label>
                   <input
                     type="number"
@@ -603,6 +603,7 @@ export default function App() {
                     Diagnóstico da Rota ({origin.code} → {destination.code} • {searchedPax} pax)
                   </div>
                   <p className="text-sm text-slate-300 leading-relaxed">{routeSummary}</p>
+                  {results.length > 0 && <p className="text-xs text-amber-300 mt-2">A tarifa publicada é uma referência do anúncio, não uma confirmação de disponibilidade ou do total para todos os passageiros. Confira no site da Azul antes de transferir pontos.</p>}
                 </div>
               </div>
             )}
@@ -614,15 +615,11 @@ export default function App() {
                   <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                     Melhores Oportunidades ({searchedPax} {searchedPax === 1 ? 'Passageiro' : 'Passageiros'})
                   </h2>
-                  <span className="text-xs text-slate-500 font-mono">
-                    Meta total: ≤ {(Number(targetPoints) * searchedPax).toLocaleString('pt-BR')} pts
-                  </span>
+                  <span className="text-xs text-slate-500 font-mono">Preço publicado pela Azul</span>
                 </div>
 
                 {results.map((ticket, index) => {
-                  const totalMeta = Number(targetPoints) * searchedPax;
-                  const withinTarget = ticket.totalPoints <= totalMeta;
-                  const perPax = Math.round(ticket.totalPoints / searchedPax);
+                  const withinTarget = false;
 
                   return (
                     <div
@@ -657,7 +654,7 @@ export default function App() {
                           </div>
 
                           <div className="flex flex-col items-center px-2">
-                            <span className="text-[10px] font-mono text-slate-400 mb-1">{days} dias</span>
+                            <span className="text-[10px] font-mono text-slate-400 mb-1">{ticket.nights || days} noites</span>
                             <div className="w-20 h-[1px] bg-slate-700 relative flex items-center justify-center">
                               <Plane className="w-3.5 h-3.5 text-sky-400 bg-slate-900 px-0.5" />
                             </div>
@@ -674,15 +671,13 @@ export default function App() {
                         <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-800">
                           <div className="text-left sm:text-right">
                             <div className="text-[11px] uppercase tracking-wider text-slate-400">
-                              {program} • {searchedPax} {searchedPax === 1 ? 'pessoa' : 'pessoas'}
+                              Azul • tarifa publicada
                             </div>
                             <div className={`text-2xl font-black font-mono ${withinTarget ? 'text-emerald-400' : 'text-white'}`}>
                               {ticket.totalPoints.toLocaleString('pt-BR')} <span className="text-xs font-normal">pts</span>
                             </div>
                             <div className="text-[11px] text-slate-500 font-mono">
-                              {searchedPax > 1
-                                ? `~${perPax.toLocaleString('pt-BR')} pts por pessoa`
-                                : `Ida ${ticket.outboundPoints.toLocaleString('pt-BR')} + Volta ${ticket.returnPoints.toLocaleString('pt-BR')}`}
+                              Valor anunciado para o itinerário; confirme passageiros no checkout
                             </div>
                           </div>
 
