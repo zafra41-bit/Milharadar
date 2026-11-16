@@ -39,7 +39,7 @@ function parseMonthLabel(value) {
   return month === undefined ? null : `${Number(`20${match[2]}`)}-${String(month + 1).padStart(2, '0')}`;
 }
 
-function parseOffers(text, requestedMonths, minimumDays) {
+function parseOffers(text, requestedMonths, minimumDays, passengers) {
   const monthKeys = new Set((requestedMonths || []).map(parseMonthLabel).filter(Boolean));
   const pattern = /Ida\s*e\s*volta\s*[|·•]?\s*(\d{2})\/(\d{2})\/(\d{4})\s*[-–]\s*(\d{2})\/(\d{2})\/(\d{4})[\s|·•]+A partir de\s*([\d.,]+)\s*pontos/gi;
   const offers = [];
@@ -64,13 +64,15 @@ function parseOffers(text, requestedMonths, minimumDays) {
       monthLabel: departure.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' }),
       outboundPoints: null,
       returnPoints: null,
-      totalPoints: points,
+      pointsPerPassenger: points,
+      totalPoints: points * passengers,
+      passengers,
       airline: 'Azul',
       stops: 'Conforme disponibilidade no site da Azul',
       duration: `${nights} noites`,
       nights,
       priceBasis: 'published-itinerary',
-      insight: 'Tarifa de ida e volta publicada pela Azul. O valor é uma referência do anúncio e precisa ser confirmado no checkout para a quantidade e a composição dos passageiros.'
+      insight: `A Azul publicou ${points.toLocaleString('pt-BR')} pontos por passageiro. Total estimado multiplicado por ${passengers} passageiro(s); confirme o valor final no checkout.`
     });
   }
 
@@ -83,7 +85,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { origin, destination, months, days = 7, program = 'TudoAzul' } = req.body || {};
+    const { origin, destination, months, days = 7, passengers = 1, program = 'TudoAzul' } = req.body || {};
+    const paxCount = Math.max(1, Math.min(9, Number(passengers) || 1));
     if (!origin?.city || !destination?.city || !Array.isArray(months) || months.length === 0) {
       return res.status(400).json({ error: 'Informe origem, destino e pelo menos um mês.' });
     }
@@ -112,7 +115,7 @@ export default async function handler(req, res) {
 
     const html = await response.text();
     const text = htmlToText(html);
-    const options = parseOffers(text, months, Math.max(1, Math.min(60, Number(days) || 7)));
+    const options = parseOffers(text, months, Math.max(1, Math.min(60, Number(days) || 7)), paxCount);
 
     if (!options.length) {
       return res.status(200).json({
@@ -131,7 +134,7 @@ export default async function handler(req, res) {
       source: 'Azul — página pública de ofertas em pontos',
       sourceUrl: url,
       checkedAt: new Date().toISOString(),
-      warning: 'A Azul informa que as ofertas são coletadas nas últimas 48 horas e podem não estar mais disponíveis. O preço publicado não confirma o total para todos os passageiros; valide a composição no checkout.'
+      warning: `A Azul informa que as ofertas são coletadas nas últimas 48 horas e podem não estar mais disponíveis. O app multiplica o valor anunciado por passageiro por ${paxCount}; confirme a tarifa final no checkout.`
     });
   } catch (error) {
     return res.status(502).json({
