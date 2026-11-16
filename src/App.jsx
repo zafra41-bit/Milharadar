@@ -257,7 +257,7 @@ export default function App() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Falha na consulta (HTTP ${res.status}).`);
+      if (!res.ok) throw new Error([data.error || `Falha na consulta (HTTP ${res.status}).`, data.detail].filter(Boolean).join(' — '));
 
       const sorted = (data.options || []).sort((a, b) => a.totalPoints - b.totalPoints);
       setResults(sorted);
