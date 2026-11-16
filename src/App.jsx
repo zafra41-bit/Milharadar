@@ -185,6 +185,7 @@ export default function App() {
   const [results, setResults] = useState([]);
   const [searchedPax, setSearchedPax] = useState(1);
   const [routeSummary, setRouteSummary] = useState('');
+  const [searchMeta, setSearchMeta] = useState(null);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const [showInstallTip, setShowInstallTip] = useState(false);
@@ -226,6 +227,9 @@ export default function App() {
     }
     setLoading(true);
     setError('');
+    setResults([]);
+    setRouteSummary('');
+    setSearchMeta(null);
     const currentPax = Math.max(1, Number(passengers) || 1);
 
     try {
@@ -243,13 +247,14 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro ao consultar tarifas');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Falha na consulta (HTTP ${res.status}).`);
 
       const sorted = (data.options || []).sort((a, b) => a.totalPoints - b.totalPoints);
       setResults(sorted);
       setSearchedPax(currentPax);
       setRouteSummary(data.routeSummary || '');
+      setSearchMeta({ source: data.source, sourceUrl: data.sourceUrl, checkedAt: data.checkedAt, warning: data.warning });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -557,7 +562,7 @@ export default function App() {
                   {loading ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      Consultando Agente IA...
+                      Consultando ofertas da Azul...
                     </>
                   ) : (
                     <>
@@ -606,6 +611,17 @@ export default function App() {
                   {results.length > 0 && <p className="text-xs text-amber-300 mt-2">A tarifa publicada é uma referência do anúncio, não uma confirmação de disponibilidade ou do total para todos os passageiros. Confira no site da Azul antes de transferir pontos.</p>}
                 </div>
               </div>
+            )}
+
+            {searchMeta?.warning && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+                <div>{searchMeta.warning}</div>
+                {searchMeta.sourceUrl && <a className="mt-2 inline-block underline font-semibold" href={searchMeta.sourceUrl} target="_blank" rel="noreferrer">Conferir página consultada na Azul</a>}
+                {searchMeta.checkedAt && <div className="mt-1 text-amber-200/70">Consulta: {new Date(searchMeta.checkedAt).toLocaleString('pt-BR')}</div>}
+              </div>
+            )}
+            {routeSummary && results.length === 0 && !error && (
+              <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4 text-sm text-slate-300">Nenhuma oferta publicada correspondeu aos filtros. Isso não confirma que não existam voos disponíveis; confira também a busca completa no site da Azul.</div>
             )}
 
             {/* Boarding Pass Results */}
