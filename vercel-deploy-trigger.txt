@@ -1,0 +1,1 @@
+Trigger de publicação Vercel — código atual da branch main.
