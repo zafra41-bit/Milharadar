@@ -116,6 +116,9 @@ export default async function handler(req, res) {
     const html = await response.text();
     const text = htmlToText(html);
     const options = parseOffers(text, months, Math.max(1, Math.min(60, Number(days) || 7)), paxCount);
+    if (!text.trim() || /access denied|captcha|robot|cloudflare/i.test(text.slice(0, 1200))) {
+      return res.status(502).json({ error: 'A Azul bloqueou ou não entregou o conteúdo da página para a consulta automática. Tente novamente mais tarde; nenhum preço foi estimado.', sourceUrl: url });
+    }
 
     if (!options.length) {
       return res.status(200).json({
