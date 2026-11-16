@@ -56,7 +56,7 @@ export default async function handler(req,res) {
         if(!labels.length) continue;
         const date=monthDate(labels[(new Date().getUTCDate()-1)%labels.length]);
         if(!date) continue;
-        const match=await queryGecko(alert,date); credits++;
+        await supabase('rpc/record_milharadar_alert_gecko_query',{method:'POST',body:'{}'});\n        const match=await queryGecko(alert,date); credits++;
         const previous=alert.last_match;
         const now=new Date().toISOString();
         await supabase('milharadar_alerts?id=eq.'+alert.id,{method:'PATCH',headers:{Prefer:'return=minimal'},
