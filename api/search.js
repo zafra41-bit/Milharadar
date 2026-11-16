@@ -41,7 +41,7 @@ function parseMonthLabel(value) {
 
 function parseOffers(text, requestedMonths, minimumDays, passengers) {
   const monthKeys = new Set((requestedMonths || []).map(parseMonthLabel).filter(Boolean));
-  const pattern = /Ida\\s*e\\s*volta[\\s\\S]{0,180}?(\\d{2})\\/(\\d{2})\\/(\\d{4})\\s*[-–]\\s*(\\d{2})\\/(\\d{2})\\/(\\d{4})[\\s\\S]{0,100}?A partir de\\s*([\\d.,]+)\\s*pontos/gi;
+  const pattern = /Ida\s*e\s*volta[\s\S]{0,180}?(\d{2})\/(\d{2})\/(\d{4})\s*[-–]\s*(\d{2})\/(\d{2})\/(\d{4})[\s\S]{0,100}?A partir de\s*([\d.,]+)\s*pontos/gi;
   const offers = [];
   let match;
 
