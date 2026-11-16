@@ -99,19 +99,19 @@ async function fetchGecko(args) {
   return payload.data;
 }
 async function searchGecko(args) {
-  const dates=args.months.flatMap(monthSamples).slice(0,12); // no máximo 60 créditos por busca
-  const offers=[], failures=[]; let successful=0;
-  for (const departureDate of dates) {
+  const dates=args.months.map(label=>monthSamples(label)[2]).filter(Boolean).slice(0,3); // 1 consulta por mês, até 15 créditos por busca
+  const settled=await Promise.all(dates.map(async departureDate=>{
     try {
       const data=await fetchGecko({...args,departureDate,returnDate:addDays(departureDate,args.days)});
-      if (!data) continue;
+      if (!data) return {ok:true,options:[]};
       if (data.from!==args.origin.code||data.to!==args.destination.code) throw new Error('A API retornou rota diferente da solicitada.');
       if (data.pricingMode!=='points') throw new Error('A API não retornou tarifas em pontos.');
-      successful++; offers.push(...normalizeGecko(data,args.adults,args.days));
-    } catch(e) { failures.push({departureDate,message:e.message}); }
-  }
+      return {ok:true,options:normalizeGecko(data,args.adults,args.days)};
+    } catch(e) { return {ok:false,error:{departureDate,message:e.message}}; }
+  }));
+  const offers=settled.flatMap(x=>x.options||[]), failures=settled.filter(x=>!x.ok).map(x=>x.error);
   return {options:[...new Map(offers.map(o=>[o.id,o])).values()].sort((a,b)=>a.totalPoints-b.totalPoints),
-    attemptedQueries:dates.length,successfulQueries:successful,failures};
+    attemptedQueries:dates.length,successfulQueries:settled.filter(x=>x.ok).length,failures};
 }
 async function fetchAzulPage(url) {
   let response=null,status=null,error=null;
@@ -156,7 +156,7 @@ export default async function handler(req,res) {
       const backup=await searchGecko({origin,destination,months,days,adults,children,infants});
       if(backup.options.length) return res.status(200).json({routeSummary:backup.options.length+' opção(ões) via GeckoAPI em datas amostradas; a página pública da Azul não forneceu ofertas utilizáveis.',
         options:backup.options,source:'GeckoAPI → voeazul.com.br (TudoAzul)',sourceUrl:url,checkedAt:new Date().toISOString(),
-        fallbackUsed:true,warning:'Redundância acionada. Até 4 datas por mês, máximo 12 consultas (60 créditos). Não é varredura integral do mês. Preços por adulto, taxas separadas; valide disponibilidade conjunta no checkout.',
+        fallbackUsed:true,warning:'Redundância acionada. Uma data representativa por mês (dia 15), máximo 3 consultas (15 créditos). Não é varredura integral do mês. Preços por adulto, taxas separadas; valide disponibilidade conjunta no checkout.',
         diagnostics:{attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,failures:backup.failures}});
       if(backup.successfulQueries>0) return res.status(200).json({routeSummary:'Consultas GeckoAPI concluídas, mas sem jornadas com resgate em pontos nos dias amostrados.',
         options:[],source:'GeckoAPI → voeazul.com.br (TudoAzul)',checkedAt:new Date().toISOString(),fallbackUsed:true,
