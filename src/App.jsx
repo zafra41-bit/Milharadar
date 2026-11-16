@@ -633,16 +633,9 @@ export default function App() {
                           <span className="text-xs font-semibold text-slate-300">{ticket.airline}</span>
                           <span className="text-[11px] text-slate-500">• {ticket.stops}</span>
                         </div>
-                        {withinTarget ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Dentro da Meta
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                            Acima da Meta
-                          </span>
-                        )}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                          Oferta publicada
+                        </span>
                       </div>
 
                       {/* Main Boarding Pass Body */}
