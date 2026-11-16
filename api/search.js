@@ -118,20 +118,42 @@ async function fetchGecko(args) {
   if (!payload||!payload.data) throw new Error('Resposta GeckoAPI sem data.');
   return payload.data;
 }
+async function reserveManualGeckoQuery() {
+  const base=(process.env.SUPABASE_URL||'').replace(/\\/$/,'');
+  const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!base||!key) throw new Error('Limite diário indisponível: configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY.');
+  const response=await fetch(base+'/rest/v1/rpc/reserve_milharadar_manual_gecko_query',{
+    method:'POST',
+    headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json',Accept:'application/json'},
+    body:'{}',
+    signal:AbortSignal.timeout(10000)
+  });
+  const payload=await response.json().catch(()=>null);
+  if(!response.ok||!Array.isArray(payload)||!payload[0]) throw new Error('Não foi possível validar a cota diária da GeckoAPI no Supabase.');
+  return payload[0];
+}
 async function searchGecko(args) {
-  const dates=args.months.map(label=>monthSamples(label)[2]).filter(Boolean).slice(0,3); // 1 consulta por mês, até 15 créditos por busca
-  const settled=await Promise.all(dates.map(async departureDate=>{
-    try {
-      const data=await fetchGecko({...args,departureDate,returnDate:addDays(departureDate,args.days)});
-      if (!data) return {ok:true,options:[]};
-      if (data.from!==args.origin.code||data.to!==args.destination.code) throw new Error('A API retornou rota diferente da solicitada.');
-      if (data.pricingMode!=='points') throw new Error('A API não retornou tarifas em pontos.');
-      return {ok:true,options:normalizeGecko(data,args.adults,args.days)};
-    } catch(e) { return {ok:false,error:{departureDate,message:e.message}}; }
-  }));
-  const offers=settled.flatMap(x=>x.options||[]), failures=settled.filter(x=>!x.ok).map(x=>x.error);
-  return {options:[...new Map(offers.map(o=>[o.id,o])).values()].sort((a,b)=>a.totalPoints-b.totalPoints),
-    attemptedQueries:dates.length,successfulQueries:settled.filter(x=>x.ok).length,failures};
+  const departureDate=args.months.map(label=>monthSamples(label)[2]||monthSamples(label)[0]).find(Boolean);
+  if(!departureDate) throw new Error('Não foi possível determinar uma data para a consulta.');
+  const quota=await reserveManualGeckoQuery();
+  if(!quota.allowed) {
+    const error=new Error('Limite diário atingido: você já utilizou as 3 consultas manuais da GeckoAPI de hoje. Os alertas diários têm cota separada.');
+    error.code='GECKO_DAILY_LIMIT';
+    error.used=quota.used;
+    throw error;
+  }
+  const returnDate=addDays(departureDate,args.days);
+  try {
+    const data=await fetchGecko({...args,departureDate,returnDate});
+    if(!data) return {options:[],attemptedQueries:1,successfulQueries:1,failures:[],departureDate,returnDate,remaining:quota.remaining};
+    if(data.from!==args.origin.code||data.to!==args.destination.code) throw new Error('A API retornou rota diferente da solicitada.');
+    if(data.pricingMode!=='points') throw new Error('A API não retornou tarifas em pontos.');
+    return {options:normalizeGecko(data,args.adults,args.days),attemptedQueries:1,successfulQueries:1,failures:[],
+      departureDate,returnDate,remaining:quota.remaining};
+  } catch(e) {
+    return {options:[],attemptedQueries:1,successfulQueries:0,failures:[{departureDate,message:e.message}],
+      departureDate,returnDate,remaining:quota.remaining};
+  }
 }
 async function fetchAzulPage(url) {
   let response=null,status=null,error=null;
@@ -173,17 +195,24 @@ export default async function handler(req,res) {
     }
 
     if(process.env.GECKO_API_KEY||process.env.GECKOAPI_API_KEY) {
-      const backup=await searchGecko({origin,destination,months,days,adults,children,infants});
-      if(backup.options.length) return res.status(200).json({routeSummary:backup.options.length+' opção(ões) via GeckoAPI em datas amostradas; a página pública da Azul não forneceu ofertas utilizáveis.',
+      let backup;
+      try {
+        backup=await searchGecko({origin,destination,months,days,adults,children,infants});
+      } catch(e) {
+        if(e.code==='GECKO_DAILY_LIMIT') return res.status(429).json({error:e.message,quota:{dailyLimit:3,used:e.used,remaining:0}});
+        throw e;
+      }
+      if(backup.options.length) return res.status(200).json({routeSummary:backup.options.length+' opção(ões) via GeckoAPI para '+brDate(backup.departureDate)+' a '+brDate(backup.returnDate)+'.',
         options:backup.options,source:'GeckoAPI → voeazul.com.br (TudoAzul)',sourceUrl:url,checkedAt:new Date().toISOString(),
-        fallbackUsed:true,warning:'Redundância acionada. Uma data representativa por mês (dia 15), máximo 3 consultas (15 créditos). Não é varredura integral do mês. Preços por adulto, taxas separadas; valide disponibilidade conjunta no checkout.',
-        diagnostics:{attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,failures:backup.failures}});
-      if(backup.successfulQueries>0) return res.status(200).json({routeSummary:'Consultas GeckoAPI concluídas, mas sem jornadas com resgate em pontos nos dias amostrados.',
+        fallbackUsed:true,warning:'Consulta real de ida e volta em uma data representativa do primeiro mês selecionado. Não é varredura integral do mês nem dos demais meses. Preços por adulto, taxas separadas; valide disponibilidade conjunta no checkout.',
+        quota:{dailyLimit:3,remaining:backup.remaining},diagnostics:{attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,failures:backup.failures}});
+      if(backup.successfulQueries>0) return res.status(200).json({routeSummary:'Consulta GeckoAPI concluída, mas sem jornadas com resgate em pontos na data consultada.',
         options:[],source:'GeckoAPI → voeazul.com.br (TudoAzul)',checkedAt:new Date().toISOString(),fallbackUsed:true,
-        warning:'Resultado vazio nas datas consultadas; não significa ausência de assentos em todo o mês.',
-        diagnostics:{attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,failures:backup.failures}});
-      return res.status(503).json({error:'A fonte oficial falhou e a GeckoAPI não concluiu consultas válidas. Nenhum preço foi estimado.',
-        retryable:true,fallbackUsed:true,diagnostics:{attemptedQueries:backup.attemptedQueries,failures:backup.failures}});
+        warning:'Resultado vazio para a data consultada; não significa ausência de assentos em todo o mês.',
+        quota:{dailyLimit:3,remaining:backup.remaining},diagnostics:{attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,failures:backup.failures}});
+      return res.status(503).json({error:'A fonte oficial falhou e a GeckoAPI não concluiu uma consulta válida. Nenhum preço foi estimado.',
+        retryable:true,fallbackUsed:true,quota:{dailyLimit:3,remaining:backup.remaining},
+        diagnostics:{attemptedQueries:backup.attemptedQueries,failures:backup.failures}});
     }
     const detail=primary.error?.status?'HTTP '+primary.error.status:primary.error?.error?.name==='TimeoutError'?'tempo limite excedido':'falha de conexão';
     return res.status(503).json({error:'A Azul não disponibilizou a página ('+detail+'). Configure GECKO_API_KEY para ativar a redundância. Nenhum preço foi estimado.',
