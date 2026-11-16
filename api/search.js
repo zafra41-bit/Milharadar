@@ -3,7 +3,7 @@ const AZUL_BASE = 'https://passagens.voeazul.com.br/pt';
 function slugify(value = '') {
   return String(value)
     .toLowerCase()
-    .replace(/[^\\p{L}\\p{N}]+/gu, '-')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-|-$/g, '');
 }
 
