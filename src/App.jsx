@@ -190,20 +190,29 @@ export default function App() {
   const [copiedId, setCopiedId] = useState(null);
   const [showInstallTip, setShowInstallTip] = useState(false);
 
-  const [alerts, setAlerts] = useState(() => {
-    try {
-      const saved = localStorage.getItem('milharadar_alerts_v2');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
+  const [deviceToken] = useState(() => {
+    let token=localStorage.getItem('milharadar_device_token');
+    if(!token) {
+      token=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(x=>x.toString(16).padStart(2,'0')).join('');
+      localStorage.setItem('milharadar_device_token',token);
     }
+    return token;
   });
+  const [alerts, setAlerts] = useState([]);
   const [alertSavedToast, setAlertSavedToast] = useState(false);
   const [scanningAlerts, setScanningAlerts] = useState(false);
+  const [alertError, setAlertError] = useState('');
+
+  const loadAlerts = async () => {
+    const response=await fetch('/api/alerts',{headers:{'x-device-token':deviceToken}});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.error||'Não foi possível carregar os alertas.');
+    setAlerts(data.alerts||[]);
+  };
 
   useEffect(() => {
-    localStorage.setItem('milharadar_alerts_v2', JSON.stringify(alerts));
-  }, [alerts]);
+    loadAlerts().catch(err=>setAlertError(err.message));
+  }, [deviceToken]);
 
   const toggleMonth = (m) => {
     setSelectedMonths(prev =>
@@ -262,75 +271,59 @@ export default function App() {
     }
   };
 
-  const handleCreateAlert = () => {
-    const currentPax = Math.max(1, Number(passengers) || 1);
-    const totalTarget = Number(targetPoints) * currentPax;
+  const enablePushNotifications = async () => {
+    try {
+      if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window)) return;
+      const permission=await Notification.requestPermission();
+      if(permission!=='granted') return;
+      const keyResponse=await fetch('/api/push-key');
+      const keyData=await keyResponse.json();
+      if(!keyResponse.ok||!keyData.publicKey) throw new Error('Chave pública de notificações indisponível.');
+      const registration=await navigator.serviceWorker.register('/sw.js');
+      const existing=await registration.pushManager.getSubscription();
+      const subscription=existing||await registration.pushManager.subscribe({
+        userVisibleOnly:true,applicationServerKey:Uint8Array.from(atob(keyData.publicKey.replace(/-/g,'+').replace(/_/g,'/')),ch=>ch.charCodeAt(0))
+      });
+      const saved=await fetch('/api/push-subscribe',{method:'POST',headers:{'Content-Type':'application/json','x-device-token':deviceToken},
+        body:JSON.stringify({subscription})});
+      if(!saved.ok) throw new Error('Não foi possível registrar as notificações.');
+    } catch(e) { setAlertError('Alerta salvo, mas notificações não foram ativadas: '+e.message); }
+  };
 
-    const newAlert = {
-      id: Date.now().toString(),
-      origin,
-      destination,
-      months: selectedMonths,
-      days,
-      passengers: currentPax,
-      program,
-      targetPointsPerPax: Number(targetPoints),
-      totalTargetPoints: totalTarget,
-      bestFound: results.length > 0 ? results[0].totalPoints : null,
-      bestDate: results.length > 0 ? `${results[0].departureDate} - ${results[0].returnDate}` : null,
-      lastChecked: 'Agora mesmo',
-      status: results.length > 0 && results[0].totalPoints <= totalTarget ? 'hit' : 'monitoring'
-    };
-
-    setAlerts(prev => [newAlert, ...prev]);
-    setAlertSavedToast(true);
-    setTimeout(() => setAlertSavedToast(false), 3000);
+  const handleCreateAlert = async () => {
+    const currentPax=Math.max(1,Number(passengers)||1);
+    try {
+      setAlertError('');
+      const response=await fetch('/api/alerts',{method:'POST',
+        headers:{'Content-Type':'application/json','x-device-token':deviceToken},
+        body:JSON.stringify({origin,destination,months:selectedMonths,days,passengers:currentPax,
+          program,targetPointsPerPax:Number(targetPoints)})});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(data.error||'Não foi possível salvar o alerta.');
+      await loadAlerts();
+      await enablePushNotifications();
+      setAlertSavedToast(true);
+      setTimeout(()=>setAlertSavedToast(false),3000);
+    } catch(e) { setAlertError(e.message); }
   };
 
   const runAlertMonitorCycle = async () => {
-    if (alerts.length === 0) return;
     setScanningAlerts(true);
+    setAlertError('');
+    try { await loadAlerts(); }
+    catch(e) { setAlertError(e.message); }
+    finally { setScanningAlerts(false); }
+  };
 
-    const updated = [...alerts];
-    for (let i = 0; i < updated.length; i++) {
-      const item = updated[i];
-      const pax = item.passengers || 1;
-      const targetPerPax = item.targetPointsPerPax || item.targetPoints || 45000;
-      const totalTarget = targetPerPax * pax;
-
-      try {
-        const res = await fetch('/api/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            origin: item.origin,
-            destination: item.destination,
-            months: item.months,
-            days: item.days,
-            passengers: pax,
-            program: item.program,
-            targetPoints: targetPerPax
-          })
-        });
-        const data = await res.json();
-        if (res.ok && data.options?.length > 0) {
-          const sorted = data.options.sort((a, b) => a.totalPoints - b.totalPoints);
-          const best = sorted[0];
-          updated[i] = {
-            ...item,
-            bestFound: best.totalPoints,
-            bestDate: `${best.departureDate} - ${best.returnDate}`,
-            lastChecked: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            status: best.totalPoints <= totalTarget ? 'hit' : 'monitoring'
-          };
-        }
-      } catch {
-        // mantém estado anterior em caso de falha pontual
-      }
-    }
-
-    setAlerts(updated);
-    setScanningAlerts(false);
+  const deleteAlert = async (id) => {
+    try {
+      const response=await fetch('/api/alerts?id='+encodeURIComponent(id),{
+        method:'DELETE',headers:{'x-device-token':deviceToken}
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(data.error||'Não foi possível excluir o alerta.');
+      setAlerts(prev=>prev.filter(a=>a.id!==id));
+    } catch(e) { setAlertError(e.message); }
   };
 
   const copySummary = (ticket) => {
@@ -744,6 +737,7 @@ export default function App() {
               </button>
             </div>
 
+            {alertError && <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">{alertError}</div>}
             {alerts.length === 0 ? (
               <div className="text-center py-12 bg-slate-900/40 border border-slate-800/80 rounded-2xl">
                 <Bell className="w-10 h-10 text-slate-600 mx-auto mb-3" />
@@ -809,7 +803,7 @@ export default function App() {
                         </div>
 
                         <button
-                          onClick={() => setAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                          onClick={() => deleteAlert(alert.id)}
                           className="p-2 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
                           title="Excluir alerta"
                         >
