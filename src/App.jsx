@@ -670,7 +670,7 @@ export default function App() {
                               {ticket.totalPoints.toLocaleString('pt-BR')} <span className="text-xs font-normal">pts</span>
                             </div>
                             <div className="text-[11px] text-slate-500 font-mono">
-                              Valor anunciado para o itinerário; confirme passageiros no checkout
+                              ${ticket.pointsPerPassenger?.toLocaleString('pt-BR') || ticket.totalPoints.toLocaleString('pt-BR')} pts/passageiro × ${searchedPax} = total estimado
                             </div>
                           </div>
 
