@@ -119,7 +119,7 @@ async function fetchGecko(args) {
   return payload.data;
 }
 async function reserveManualGeckoQuery() {
-  const base=(process.env.SUPABASE_URL||'').replace(/\\/$/,'');
+  const rawBase=process.env.SUPABASE_URL||'';\n  const base=rawBase.endsWith('/')?rawBase.slice(0,-1):rawBase;
   const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!base||!key) throw new Error('Limite diário indisponível: configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY.');
   const response=await fetch(base+'/rest/v1/rpc/reserve_milharadar_manual_gecko_query',{
