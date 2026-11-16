@@ -50,7 +50,7 @@ function parseOffers(text, requestedMonths, minimumDays) {
     const departure = new Date(Date.UTC(Number(y1), Number(m1) - 1, Number(d1)));
     const returning = new Date(Date.UTC(Number(y2), Number(m2) - 1, Number(d2)));
     const nights = Math.round((returning - departure) / 86400000);
-    const points = Number(rawPoints.replace(/\./g, '').replace(',', '.'));
+    const points = Number(rawPoints.replace(/[.,]/g, ''));
 
     if (!Number.isFinite(points) || points <= 0 || nights < minimumDays) continue;
     if (monthKeys.size && !monthKeys.has(monthKey(departure))) continue;
