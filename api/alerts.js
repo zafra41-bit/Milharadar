@@ -8,7 +8,7 @@ export default async function handler(req,res) {
       const rows=await supabase('milharadar_alerts?device_token_hash=eq.'+device_token_hash+'&active=eq.true&order=created_at.desc');
       return res.status(200).json({alerts:rows.map(row=>({...row,id:row.id,days:row.duration_days,
         targetPointsPerPax:row.target_points_per_pax,bestFound:row.last_match?.totalPoints??null,
-        bestDate:row.last_match?.date??null,lastChecked:row.last_checked_at??null,
+        bestDate:row.last_match?.departureDate?(row.last_match.departureDate+' - '+row.last_match.returnDate):null,lastChecked:row.last_checked_at??null,
         status:row.last_match?.status??'monitoring'}))});
     }
     if(req.method==='POST') {
