@@ -98,18 +98,49 @@ export default async function handler(req, res) {
     }
 
     const url = `${AZUL_BASE}/voos-de-${slugify(origin.city)}-para-${slugify(destination.city)}`;
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; MilhaRadar/1.0; +https://milharadar-mr2pv1.vercel.app)',
-        'Accept': 'text/html,application/xhtml+xml'
-      },
-      signal: AbortSignal.timeout(12000)
-    });
+    // A página pública da Azul pode responder com erro transitório. Faça uma
+    // segunda tentativa curta antes de devolver falha; nunca gere tarifas fictícias.
+    let response;
+    let lastStatus = null;
+    let lastError = null;
 
-    if (!response.ok) {
-      return res.status(502).json({
-        error: `A página oficial da Azul não respondeu corretamente (HTTP ${response.status}). Nenhum preço estimado foi criado.`,
-        sourceUrl: url
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Referer': 'https://www.voeazul.com.br/'
+          },
+          signal: AbortSignal.timeout(7000)
+        });
+
+        if (response.ok) break;
+        lastStatus = response.status;
+        if (attempt === 0 && [429, 500, 502, 503, 504].includes(response.status)) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+      }
+    }
+
+    if (!response?.ok) {
+      const statusDetail = lastStatus ? `HTTP ${lastStatus}` : (lastError?.name === 'TimeoutError' ? 'tempo limite excedido' : 'falha de conexão');
+      return res.status(503).json({
+        error: `A Azul não disponibilizou a página de ofertas após 2 tentativas (${statusDetail}). Nenhum preço foi estimado. Tente novamente mais tarde.`,
+        sourceUrl: url,
+        upstreamStatus: lastStatus,
+        retryable: true
       });
     }
 
