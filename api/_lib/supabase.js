@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 export function config() {
-  const url=(process.env.SUPABASE_URL||'').replace(/\\/$/,'');
+  const rawUrl=process.env.SUPABASE_URL||'';\n  const url=rawUrl.endsWith('/')?rawUrl.slice(0,-1):rawUrl;
   const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
   if(!url||!key) throw new Error('Supabase não configurado no servidor.');
   return {url,key};
