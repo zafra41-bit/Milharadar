@@ -133,28 +133,47 @@ async function reserveManualGeckoQuery() {
   if(!response.ok||!Array.isArray(payload)||!payload[0]) throw new Error('Não foi possível validar a cota diária da GeckoAPI no Supabase.');
   return payload[0];
 }
+
+async function releaseManualGeckoQuery() {
+ const base=(process.env.SUPABASE_URL||'').replace(/\/$/,''); const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+ if(!base||!key) throw new Error('Supabase não configurado para devolver a cota.');
+ const r=await fetch(base+'/rest/v1/rpc/release_milharadar_manual_gecko_query',{method:'POST',
+  headers:{apikey:key,Authorization:'Bearer '+key,'Content-Type':'application/json',Accept:'application/json'},
+  body:'{}',signal:AbortSignal.timeout(10000)});
+ if(!r.ok) throw new Error('Falha ao devolver a cota GeckoAPI (HTTP '+r.status+').');
+ return r.json().catch(()=>null);
+}
+
 async function searchGecko(args) {
-  const departureDate=args.months.map(label=>monthSamples(label)[2]||monthSamples(label)[0]).find(Boolean);
-  if(!departureDate) throw new Error('Não foi possível determinar uma data para a consulta.');
+ const tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10);
+ const dates=args.months.map(label=>({label,date:monthSamples(label).find(d=>d>=tomorrow)})).filter(x=>x.date).slice(0,3);
+ if(!dates.length) throw new Error('Os meses selecionados não possuem datas futuras válidas para consulta.');
+ const options=[],failures=[]; let attemptedQueries=0,successfulQueries=0,remaining=null,used=0;
+ for(const item of dates) {
   const quota=await reserveManualGeckoQuery();
   if(!quota.allowed) {
-    const error=new Error('Limite diário atingido: você já utilizou as 3 consultas manuais da GeckoAPI de hoje. Os alertas diários têm cota separada.');
-    error.code='GECKO_DAILY_LIMIT';
-    error.used=quota.used;
-    throw error;
+   const message='Limite diário da GeckoAPI atingido: '+quota.used+' de 3 consultas utilizadas. Foram consultados '+successfulQueries+' mês(es); tente novamente amanhã.';
+   if(!attemptedQueries) { const e=new Error(message); e.code='GECKO_DAILY_LIMIT'; e.used=quota.used; throw e; }
+   failures.push({month:item.label,message}); break;
   }
-  const returnDate=addDays(departureDate,args.days);
+  attemptedQueries++; used=quota.used; remaining=quota.remaining;
+  const returnDate=addDays(item.date,args.days);
   try {
-    const data=await fetchGecko({...args,departureDate,returnDate});
-    if(!data) return {options:[],attemptedQueries:1,successfulQueries:1,failures:[],departureDate,returnDate,remaining:quota.remaining};
+   const data=await fetchGecko({...args,departureDate:item.date,returnDate});
+   if(data) {
     if(data.from!==args.origin.code||data.to!==args.destination.code) throw new Error('A API retornou rota diferente da solicitada.');
     if(data.pricingMode!=='points') throw new Error('A API não retornou tarifas em pontos.');
-    return {options:normalizeGecko(data,args.adults,args.days),attemptedQueries:1,successfulQueries:1,failures:[],
-      departureDate,returnDate,remaining:quota.remaining};
+    options.push(...normalizeGecko(data,args.adults,args.days));
+   }
+   successfulQueries++;
   } catch(e) {
-    return {options:[],attemptedQueries:1,successfulQueries:0,failures:[{departureDate,message:e.message}],
-      departureDate,returnDate,remaining:quota.remaining};
+   let quotaReturned=false,refundError=null;
+   try { await releaseManualGeckoQuery(); quotaReturned=true; remaining=Math.min(3,(remaining??0)+1); }
+   catch(refund) { refundError=refund.message; }
+   failures.push({month:item.label,departureDate:item.date,message:e.message,quotaReturned,refundError});
   }
+ }
+ return {options,attemptedQueries,successfulQueries,failures,remaining,used,checkedMonths:dates.map(x=>x.label)};
 }
 async function fetchAzulPage(url) {
   let response=null,status=null,error=null;
@@ -197,23 +216,28 @@ export default async function handler(req,res) {
 
     if(process.env.GECKO_API_KEY||process.env.GECKOAPI_API_KEY) {
       let backup;
-      try {
-        backup=await searchGecko({origin,destination,months,days,adults,children,infants});
-      } catch(e) {
+      try { backup=await searchGecko({origin,destination,months,days,adults,children,infants}); }
+      catch(e) {
         if(e.code==='GECKO_DAILY_LIMIT') return res.status(429).json({error:e.message,quota:{dailyLimit:3,used:e.used,remaining:0}});
         throw e;
       }
-      if(backup.options.length) return res.status(200).json({routeSummary:backup.options.length+' opção(ões) via GeckoAPI para '+brDate(backup.departureDate)+' a '+brDate(backup.returnDate)+'.',
+      const diagnostics={attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,
+        checkedMonths:backup.checkedMonths,failures:backup.failures};
+      if(backup.options.length) return res.status(200).json({
+        routeSummary:backup.options.length+' opção(ões) reais via GeckoAPI encontradas em '+backup.successfulQueries+' mês(es) consultado(s).',
         options:backup.options,source:'GeckoAPI → voeazul.com.br (TudoAzul)',sourceUrl:url,checkedAt:new Date().toISOString(),
-        fallbackUsed:true,warning:'Consulta real de ida e volta em uma data representativa do primeiro mês selecionado. Não é varredura integral do mês nem dos demais meses. Preços por adulto, taxas separadas; valide disponibilidade conjunta no checkout.',
-        quota:{dailyLimit:3,remaining:backup.remaining},diagnostics:{attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,failures:backup.failures}});
-      if(backup.successfulQueries>0) return res.status(200).json({routeSummary:'Consulta GeckoAPI concluída, mas sem jornadas com resgate em pontos na data consultada.',
+        fallbackUsed:true,warning:'A GeckoAPI consultou uma data representativa por mês selecionado (até 3 meses por busca). Não é varredura diária completa. Os pontos exibidos são por adulto; confirme valores para crianças/bebês e taxas no checkout.',
+        quota:{dailyLimit:3,used:backup.used,remaining:backup.remaining},diagnostics});
+      if(backup.successfulQueries>0) return res.status(200).json({
+        routeSummary:'Consulta GeckoAPI concluída, mas sem jornadas com resgate em pontos nas datas representativas consultadas.',
         options:[],source:'GeckoAPI → voeazul.com.br (TudoAzul)',checkedAt:new Date().toISOString(),fallbackUsed:true,
-        warning:'Resultado vazio para a data consultada; não significa ausência de assentos em todo o mês.',
-        quota:{dailyLimit:3,remaining:backup.remaining},diagnostics:{attemptedQueries:backup.attemptedQueries,successfulQueries:backup.successfulQueries,failures:backup.failures}});
-      return res.status(503).json({error:'A fonte oficial falhou e a GeckoAPI não concluiu uma consulta válida. Nenhum preço foi estimado.',
-        retryable:true,fallbackUsed:true,quota:{dailyLimit:3,remaining:backup.remaining},
-        diagnostics:{attemptedQueries:backup.attemptedQueries,failures:backup.failures}});
+        warning:'Resultado vazio nas datas representativas consultadas; não significa ausência de assentos nos meses inteiros.',
+        quota:{dailyLimit:3,used:backup.used,remaining:backup.remaining},diagnostics});
+      return res.status(503).json({
+        error:'A fonte oficial falhou e a GeckoAPI não concluiu uma consulta válida. Nenhum preço foi estimado.',
+        retryable:true,fallbackUsed:true,quota:{dailyLimit:3,used:backup.used,remaining:backup.remaining},
+        detail:backup.failures.map(f=>f.month+': '+f.message+(f.refundError?' (falha ao devolver cota: '+f.refundError+')':'')).join(' | '),
+        diagnostics});
     }
     const detail=primary.error?.status?'HTTP '+primary.error.status:primary.error?.error?.name==='TimeoutError'?'tempo limite excedido':'falha de conexão';
     return res.status(503).json({error:'A Azul não disponibilizou a página ('+detail+'). Configure GECKO_API_KEY para ativar a redundância. Nenhum preço foi estimado.',

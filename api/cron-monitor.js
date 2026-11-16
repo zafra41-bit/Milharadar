@@ -57,7 +57,8 @@ export default async function handler(req,res) {
       try {
         const labels=Array.isArray(alert.months)?alert.months:[];
         if(!labels.length) continue;
-        const date=monthDate(labels[(new Date().getUTCDate()-1)%labels.length]);
+        const today=new Date().toISOString().slice(0,10);
+        const date=labels.map(label=>monthDate(label,15)).filter(Boolean).filter(value=>value>=today).sort()[0];
         if(!date) continue;
         await supabase('rpc/record_milharadar_alert_gecko_query',{method:'POST',body:'{}'});
         const match=await queryGecko(alert,date); credits++;
@@ -79,6 +80,6 @@ export default async function handler(req,res) {
         }
       } catch(e) { failed++; }
     }
-    return res.status(200).json({status:'ok',executedAt:new Date().toISOString(),alerts:alerts.length,checked,matched,failed,geckoQueries:credits,geckoCredits:credits*5,pushConfigured:pushReady});
+    return res.status(200).json({status:'ok',executedAt:new Date().toISOString(),alerts:alerts.length,checked,matched,failed,geckoQueries:credits,geckoCredits:credits*5,pushConfigured:pushReady,note:'Cada alerta consulta uma data representativa no próximo mês selecionado; não representa varredura integral do mês.'});
   } catch(e) { return res.status(500).json({error:e.message}); }
 }
