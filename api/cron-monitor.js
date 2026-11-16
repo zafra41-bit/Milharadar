@@ -48,8 +48,11 @@ export default async function handler(req,res) {
   try {
     const alerts=await supabase('milharadar_alerts?active=eq.true&order=created_at.asc');
     let checked=0,matched=0,failed=0,credits=0;
-    const pushReady=!!(process.env.VAPID_PUBLIC_KEY&&process.env.VAPID_PRIVATE_KEY&&process.env.VAPID_SUBJECT);
-    if(pushReady) webpush.setVapidDetails(process.env.VAPID_SUBJECT,process.env.VAPID_PUBLIC_KEY,process.env.VAPID_PRIVATE_KEY);
+    let pushReady=false;
+    if(process.env.VAPID_PUBLIC_KEY&&process.env.VAPID_PRIVATE_KEY&&process.env.VAPID_SUBJECT) {
+      try { webpush.setVapidDetails(process.env.VAPID_SUBJECT,process.env.VAPID_PUBLIC_KEY,process.env.VAPID_PRIVATE_KEY); pushReady=true; }
+      catch(e) { pushReady=false; }
+    }
     for(const alert of alerts) {
       try {
         const labels=Array.isArray(alert.months)?alert.months:[];
