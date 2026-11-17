@@ -218,7 +218,7 @@ export default function App() {
     setSelectedMonths(prev =>
       prev.includes(m)
         ? prev.length > 1 ? prev.filter(item => item !== m) : prev
-        : prev.length >= 3 ? prev : [...prev, m]
+        : [...prev, m]
     );
   };
 
@@ -257,7 +257,7 @@ export default function App() {
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { const reasons=(data.diagnostics?.failures||[]).map(f=>[f.month||f.departureDate,f.message].filter(Boolean).join(': ')); throw new Error([data.error||`Falha na consulta (HTTP ${res.status}).`,data.detail,...reasons].filter(Boolean).join(' — ')); }
+      if (!res.ok) throw new Error([data.error || `Falha na consulta (HTTP ${res.status}).`, data.detail].filter(Boolean).join(' — '));
 
       const sorted = (data.options || []).sort((a, b) => a.totalPoints - b.totalPoints);
       setResults(sorted);
@@ -441,9 +441,9 @@ export default function App() {
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-sky-400" />
-                    Meses para consulta (máximo 3 por busca)
+                    Meses Pretendidos (selecione 1 ou mais)
                   </label>
-                  <span className="text-xs text-sky-400 font-mono">{selectedMonths.length}/3 selecionado(s)</span>
+                  <span className="text-xs text-sky-400 font-mono">{selectedMonths.length} selecionado(s)</span>
                 </div>
                 <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                   {MONTHS.map(m => {
